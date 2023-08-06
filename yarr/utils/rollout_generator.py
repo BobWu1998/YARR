@@ -17,7 +17,7 @@ class RolloutGenerator(object):
     def generator(self, step_signal: Value, env: Env, agent: Agent,
                   episode_length: int, timesteps: int,
                   eval: bool, eval_demo_seed: int = 0,
-                  record_enabled: bool = False):
+                  record_enabled: bool = False, sampled_batch = None):
 
         if eval:
             obs = env.reset_to_demo(eval_demo_seed)
@@ -27,7 +27,8 @@ class RolloutGenerator(object):
         agent.reset()
         obs_history = {k: [np.array(v, dtype=self._get_type(v))] * timesteps for k, v in obs.items()}
         for step in range(episode_length):
-
+            if sampled_batch != None:
+                print(sampled_batch['trans_action_indicies'][:, self._layer * 3:self._layer * 3 + 3].int())
             prepped_data = {k:torch.tensor([v], device=self._env_device) for k, v in obs_history.items()}
 
             act_result = agent.act(step_signal.value, prepped_data,

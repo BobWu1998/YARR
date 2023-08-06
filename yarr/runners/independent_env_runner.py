@@ -12,6 +12,8 @@ from yarr.utils.stat_accumulator import StatAccumulator, SimpleAccumulator
 from yarr.agents.agent import Summary
 from helpers.custom_rlbench_env import CustomRLBenchEnv, CustomMultiTaskRLBenchEnv
 
+from yarr.replay_buffer.wrappers.pytorch_replay_buffer import PyTorchReplayBuffer
+
 from yarr.runners.env_runner import EnvRunner
 
 
@@ -37,12 +39,13 @@ class IndependentEnvRunner(EnvRunner):
                  max_fails: int = 10,
                  num_eval_runs: int = 1,
                  env_device: torch.device = None,
-                 multi_task: bool = False):
+                 multi_task: bool = False,
+                 wrapped_replay = None):
             super().__init__(train_env, agent, train_replay_buffer, num_train_envs, num_eval_envs,
                             rollout_episodes, eval_episodes, training_iterations, eval_from_eps_number,
                             episode_length, eval_env, eval_replay_buffer, stat_accumulator,
                             rollout_generator, weightsdir, logdir, max_fails, num_eval_runs,
-                            env_device, multi_task)
+                            env_device, multi_task, wrapped_replay)
 
     def summaries(self) -> List[Summary]:
         summaries = []
@@ -113,7 +116,7 @@ class IndependentEnvRunner(EnvRunner):
             self.current_replay_ratio, self.target_replay_ratio,
             self._weightsdir, self._logdir,
             self._env_device, self._previous_loaded_weight_folder,
-            num_eval_runs=self._num_eval_runs)
+            num_eval_runs=self._num_eval_runs, wrapped_replay = self._wrapped_replay)
 
         stat_accumulator = SimpleAccumulator(eval_video_fps=30)
         self._internal_env_runner._run_eval_independent('eval_env',

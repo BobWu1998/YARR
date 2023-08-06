@@ -54,6 +54,7 @@ class _IndependentEnvRunner(_EnvRunner):
                  env_device: torch.device = None,
                  previous_loaded_weight_folder: str = '',
                  num_eval_runs: int = 1,
+                 wrapped_replay = None,
                  ):
 
             super().__init__(train_env, eval_env, agent, timesteps,
@@ -63,7 +64,7 @@ class _IndependentEnvRunner(_EnvRunner):
                              eval_epochs_signal, eval_report_signal, log_freq,
                              rollout_generator, save_load_lock, current_replay_ratio,
                              target_replay_ratio, weightsdir, logdir, env_device,
-                             previous_loaded_weight_folder, num_eval_runs)
+                             previous_loaded_weight_folder, num_eval_runs, wrapped_replay)
 
     def _load_save(self):
         if self._weightsdir is None:
@@ -186,6 +187,10 @@ class _IndependentEnvRunner(_EnvRunner):
                 weight_name = str(task_weight)
                 print('Evaluating weight %s for %s' % (weight_name, task_name))
 
+            # print('self._wrapped_replay', self._wrapped_replay.dataset())
+            if self._wrapped_replay != None:
+                dataset = self._wrapped_replay.dataset()
+                data_iter = iter(dataset)
             # evaluate on N tasks * M episodes per task = total eval episodes
             for ep in range(self._eval_episodes):
                 eval_demo_seed = ep + self._eval_from_eps_number
@@ -193,11 +198,17 @@ class _IndependentEnvRunner(_EnvRunner):
 
                 # the current task gets reset after every M episodes
                 episode_rollout = []
+
+                if self._wrapped_replay != None:
+                    sampled_batch = next(data_iter)
+                else: 
+                    sampled_batch = None
+                # batch = {k: v.to(self._train_device) for k, v in sampled_batch.items() if type(v) == torch.Tensor}
                 generator = self._rollout_generator.generator(
                     self._step_signal, env, self._agent,
                     self._episode_length, self._timesteps,
                     eval, eval_demo_seed=eval_demo_seed,
-                    record_enabled=rec_cfg.enabled)
+                    record_enabled=rec_cfg.enabled, sampled_batch=sampled_batch)
                 try:
                     for replay_transition in generator:
                         while True:
@@ -226,6 +237,8 @@ class _IndependentEnvRunner(_EnvRunner):
                 except Exception as e:
                     env.shutdown()
                     raise e
+                
+                
 
                 with self.write_lock:
                     for transition in episode_rollout:
@@ -237,6 +250,8 @@ class _IndependentEnvRunner(_EnvRunner):
                         current_task_id = transition.info['active_task_id']
 
                 self._num_eval_episodes_signal.value += 1
+                for ep_ro in episode_rollout:
+                    print('action', ep_ro.action)
 
                 task_name, _ = self._get_task_name()
                 reward = episode_rollout[-1].reward

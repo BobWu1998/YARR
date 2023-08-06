@@ -43,7 +43,8 @@ class EnvRunner(object):
                  max_fails: int = 10,
                  num_eval_runs: int = 1,
                  env_device: torch.device = None,
-                 multi_task: bool = False):
+                 multi_task: bool = False,
+                 wrapped_replay = None):
         self._train_env = train_env
         self._eval_env = eval_env if eval_env else train_env
         self._agent = agent
@@ -84,6 +85,8 @@ class EnvRunner(object):
         self.current_replay_ratio = Value('f', -1)
         self._current_task_id = -1
         self._multi_task = multi_task
+
+        self._wrapped_replay = wrapped_replay
 
     def summaries(self) -> List[Summary]:
         summaries = []
