@@ -24,6 +24,11 @@ from yarr.utils.log_writer import LogWriter
 from yarr.utils.stat_accumulator import StatAccumulator
 from yarr.replay_buffer.prioritized_replay_buffer import PrioritizedReplayBuffer
 
+from uncertainty_module.temperature_scaling import TemperatureScaler
+from uncertainty_module.action_selection import ActionSelection
+import matplotlib.pyplot as plt
+from tqdm import tqdm
+
 
 class OfflineTrainRunner():
 
@@ -43,7 +48,10 @@ class OfflineTrainRunner():
                  csv_logging: bool = False,
                  load_existing_weights: bool = True,
                  rank: int = None,
-                 world_size: int = None):
+                 world_size: int = None,
+                 task_name: str = None,
+                 temperature_scaler: TemperatureScaler = None,
+                 action_selection: ActionSelection = None):
         self._agent = agent
         self._wrapped_buffer = wrapped_replay_buffer
         self._stat_accumulator = stat_accumulator
@@ -62,6 +70,9 @@ class OfflineTrainRunner():
         self._load_existing_weights = load_existing_weights
         self._rank = rank
         self._world_size = world_size
+        self._task_name = task_name
+        self._temperature_scaler = temperature_scaler
+        self._action_selection = action_selection
 
         self._writer = None
         if logdir is None:
@@ -88,9 +99,12 @@ class OfflineTrainRunner():
             shutil.rmtree(prev_dir)
 
     def _step(self, i, sampled_batch):
-        update_dict = self._agent.update(i, sampled_batch)
+        update_dict, update_conf = self._agent.update(i, sampled_batch)
         total_losses = update_dict['total_losses'].item()
-        return total_losses
+        total_conf = update_conf['total_conf']
+        true_pred = update_conf['total_true_pred']
+        total_temp_scaler_loss = update_conf['total_temp_scaler_loss']
+        return total_losses, total_conf, true_pred, total_temp_scaler_loss
 
     def _get_resume_eval_epoch(self):
         starting_epoch = 0
@@ -105,7 +119,7 @@ class OfflineTrainRunner():
     def start(self):
         logging.getLogger().setLevel(self._logging_level)
         self._agent = copy.deepcopy(self._agent)
-        self._agent.build(training=True, device=self._train_device)
+        self._agent.build(training=True, device=self._train_device, temperature_scaler=self._temperature_scaler, action_selection = self._action_selection)
 
         if self._weightsdir is not None:
             existing_weights = sorted([int(f) for f in os.listdir(self._weightsdir)])
@@ -114,6 +128,7 @@ class OfflineTrainRunner():
                 start_iter = 0
             else:
                 resume_iteration = existing_weights[-1]
+                print(os.path.join(self._weightsdir, str(resume_iteration)))
                 self._agent.load_weights(os.path.join(self._weightsdir, str(resume_iteration)))
                 start_iter = resume_iteration + 1
                 if self._rank == 0:
@@ -124,8 +139,16 @@ class OfflineTrainRunner():
 
         process = psutil.Process(os.getpid())
         num_cpu = psutil.cpu_count()
+        self._iterations = 600000 + 200 #1000 #1000 #1000 #1000 #TODO: add support for this
+        logging.info('start_iter {}'.format(start_iter))
+        logging.info('self._iterations {}'.format(self._iterations))
 
-        for i in range(start_iter, self._iterations):
+        reliability_results = {
+            'confidence': [],
+            'matching_labels': []
+        }
+        for i in tqdm(range(start_iter, self._iterations)):
+            print('iterations: {}'.format(i))
             log_iteration = i % self._log_freq == 0 and i > 0
 
             if log_iteration:
@@ -137,9 +160,11 @@ class OfflineTrainRunner():
 
             batch = {k: v.to(self._train_device) for k, v in sampled_batch.items() if type(v) == torch.Tensor}
             t = time.time()
-            loss = self._step(i, batch)
+            loss, total_conf, true_pred, total_temp_scaler_loss = self._step(i, batch)
+            reliability_results['confidence'].append(total_conf[0])
+            reliability_results['matching_labels'].append(true_pred)
             step_time = time.time() - t
-
+            logging.info('self._rank {}'.format(self._rank))
             if self._rank == 0:
                 if log_iteration and self._writer is not None:
                     agent_summaries = self._agent.update_summaries()
@@ -153,10 +178,12 @@ class OfflineTrainRunner():
                         process.cpu_percent(interval=None) / num_cpu)
 
                     logging.info(f"Train Step {i:06d} | Loss: {loss:0.5f} | Sample time: {sample_time:0.6f} | Step time: {step_time:0.4f}.")
-
+                    logging.info(f"Train Step {i:06d} | Temp Scaling Loss: {total_temp_scaler_loss:0.5f} | Sample time: {sample_time:0.6f} | Step time: {step_time:0.4f}.")
+                    
                 self._writer.end_iteration()
 
                 if i % self._save_freq == 0 and self._weightsdir is not None:
+                    torch.save(self._agent.scaler.temperature, 'temperature.pth')
                     self._save_model(i)
 
         if self._rank == 0 and self._writer is not None:
@@ -164,3 +191,83 @@ class OfflineTrainRunner():
             logging.info('Stopping envs ...')
 
             self._wrapped_buffer.replay_buffer.shutdown()
+
+        for k, v in reliability_results.items():
+
+            reliability_results[k] = np.array(v)
+
+        thresholds = [0.1*i for i in range(10)]
+        confidence_bin = np.zeros(len(reliability_results['confidence']))
+        for thresh in thresholds:
+            mask = reliability_results['confidence'] > thresh
+            indices = np.where(mask)[0]
+            confidence_bin[indices] += 1
+
+        accuracy = np.zeros(10)
+        for i in range(10):
+            print(i)
+            if (sum(reliability_results['matching_labels'][confidence_bin == i])) == 0:
+                accuracy[i] = 0
+            else:
+                accuracy[i] = sum(reliability_results['matching_labels'][confidence_bin == i]) / len(reliability_results['matching_labels'][confidence_bin == i])
+        print('logging confidence-accuracy plot')
+        print('accuracy', accuracy)
+        fig, ax = plt.subplots()
+
+        bars = ax.bar(thresholds, accuracy, width=0.1, edgecolor='black')
+
+        # Add some labels and title
+        ax.set_xlabel('Confidence')
+        ax.set_ylabel('Accuracy')
+        ax.set_title(self._task_name + ' Reliability Diagram')
+
+        # Display the plot
+        plt.tight_layout()
+        
+        # create the log folder
+        path = "/home/bobwu/shared/results/random_sample/" + self._task_name 
+        if os.path.exists(path):
+            shutil.rmtree(path)
+        os.makedirs(path)
+
+        plt.savefig(path+'/random_reliab.png') 
+        print('logging confidence-accuracy plot done! ')
+        plt.close()
+
+        # make the success/failure plots
+        colors = ['blue' if b else 'red' for b in reliability_results['matching_labels']]
+        plt.scatter(reliability_results['confidence'], reliability_results['matching_labels'], c=colors, s=2)
+        plt.yticks([0, 1], ['False', 'True'])
+        plt.xlabel('Confidence')
+        plt.ylabel('Step Success')
+        plt.title(self._task_name + ' Confidence vs Step Success')
+        plt.savefig(path+'/random_success_fail.png') 
+        plt.close()
+        # plt.show()
+        for i in range(10):
+            print(len(reliability_results['matching_labels'][confidence_bin == i]))
+
+        def count_child_processes():
+            current_process = psutil.Process(os.getpid())
+            return len(current_process.children(recursive=True))
+
+        print('num_processes', count_child_processes())
+
+        def kill_child_processes():
+            current_process = psutil.Process(os.getpid())
+            children = current_process.children(recursive=True)  # Get all child processes
+            for child in children:
+                child.kill()
+                try:
+                    child.wait(timeout=3)  # Wait up to 3 seconds for process to terminate
+                except psutil.TimeoutExpired:
+                    print(f"Child process {child.pid} did not terminate in time.")
+                
+                if child.is_running():
+                    print(f"Child process {child.pid} is still running.")
+                else:
+                    print(f"Child process {child.pid} terminated successfully.")
+
+
+        kill_child_processes() ## !!! DIRTY FIX
+        print('num_processes', count_child_processes())

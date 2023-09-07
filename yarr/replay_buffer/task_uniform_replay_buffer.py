@@ -114,6 +114,9 @@ class TaskUniformReplayBuffer(UniformReplayBuffer):
                 while not self.is_valid_transition(sampled_task_idx) and \
                     per_task_attempt_count < self._max_sample_attempts:
                     sampled_task_idx = np.random.choice(task_indices, 1)[0]
+                    # # FIX: sample in order for sampled_task_idx
+                    # sampled_task_idx = task_indices[self.task_index_index]
+                    # self.task_index_index += 1
                     per_task_attempt_count += 1
 
                 if not self.is_valid_transition(sampled_task_idx):

@@ -18,7 +18,6 @@ class RolloutGenerator(object):
                   episode_length: int, timesteps: int,
                   eval: bool, eval_demo_seed: int = 0,
                   record_enabled: bool = False, sampled_batch = None):
-
         if eval:
             obs = env.reset_to_demo(eval_demo_seed)
         else:
@@ -28,12 +27,23 @@ class RolloutGenerator(object):
         obs_history = {k: [np.array(v, dtype=self._get_type(v))] * timesteps for k, v in obs.items()}
         for step in range(episode_length):
             if sampled_batch != None:
-                print(sampled_batch['trans_action_indicies'][:, self._layer * 3:self._layer * 3 + 3].int())
+                # batch = {k: v.to(self._train_device) for k, v in sampled_batch.items() if type(v) == torch.Tensor}
+                batch = {k: v for k, v in sampled_batch.items() if type(v) == torch.Tensor}
+                # print(step, batch['trans_action_indicies'])
+                self._layer = 0
+                # print('translation', batch['trans_action_indicies'][:, self._layer * 3:self._layer * 3 + 3].int())
+                # print(batch.keys())
+                
             prepped_data = {k:torch.tensor([v], device=self._env_device) for k, v in obs_history.items()}
-
+            # print('step_signal.value')
+            # print(step_signal.value)
+            # print('prepped_data')
+            # print(prepped_data)
             act_result = agent.act(step_signal.value, prepped_data,
                                    deterministic=eval)
-
+            total_conf = act_result.info['total_conf']
+            # print(act_result)
+            # exit()
             # Convert to np if not already
             agent_obs_elems = {k: np.array(v) for k, v in
                                act_result.observation_elements.items()}
@@ -84,7 +94,7 @@ class RolloutGenerator(object):
                                                                 steps=60, step_scene=True)
 
             obs = dict(transition.observation)
-            yield replay_transition
+            yield replay_transition, total_conf
 
             if transition.info.get("needs_reset", transition.terminal):
                 return

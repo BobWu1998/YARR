@@ -24,6 +24,9 @@ from pyrep.objects.vision_sensor import VisionSensor
 
 from yarr.runners._env_runner import _EnvRunner
 
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+import os
 
 class _IndependentEnvRunner(_EnvRunner):
 
@@ -55,6 +58,8 @@ class _IndependentEnvRunner(_EnvRunner):
                  previous_loaded_weight_folder: str = '',
                  num_eval_runs: int = 1,
                  wrapped_replay = None,
+                 temperature_scaler = None,
+                 action_selection = None
                  ):
 
             super().__init__(train_env, eval_env, agent, timesteps,
@@ -64,7 +69,7 @@ class _IndependentEnvRunner(_EnvRunner):
                              eval_epochs_signal, eval_report_signal, log_freq,
                              rollout_generator, save_load_lock, current_replay_ratio,
                              target_replay_ratio, weightsdir, logdir, env_device,
-                             previous_loaded_weight_folder, num_eval_runs, wrapped_replay)
+                             previous_loaded_weight_folder, num_eval_runs, wrapped_replay, temperature_scaler, action_selection)
 
     def _load_save(self):
         if self._weightsdir is None:
@@ -110,6 +115,42 @@ class _IndependentEnvRunner(_EnvRunner):
             raise Exception('Neither task_class nor task_classes found in eval env')
         return eval_task_name, multi_task
 
+
+    def draw_episodes(self, log_dir, reliability_results):
+        scores, binaries = reliability_results['confidence'], reliability_results['matching_labels']
+        # _dir = log_dir + '/100_episodes'
+        # if not os.path.exists(_dir):
+        #     os.makedirs(_dir)
+
+        def get_max_step(scores):
+            max_step = 0
+            for score in scores:
+                if len(score) > max_step:
+                    max_step = len(score)
+            return max_step
+
+        # For each time step, plot the scores and binary values for all episodes in a single plot
+        max_step = get_max_step(scores)
+        for i in range(max_step):
+            scores_at_step = []
+            binaries_at_step = []
+
+            for j, score in enumerate(scores):
+                if i < len(score):
+                    scores_at_step.append(score[i])
+                    binaries_at_step.append(binaries[j][i])
+            
+            plt.scatter(scores_at_step, binaries_at_step)
+            plt.yticks([0, 1], ['False', 'True'])
+            plt.xlabel('Confidence')
+            plt.ylabel('Episode Success')
+            plt.title('Confidence vs Episode Success')
+
+            # plt.show()
+            # save the plot with name 'step_{}.png'
+            plt.savefig(log_dir + '/step_{}.png'.format(i))
+            plt.close()
+
     def _run_eval_independent(self, name: str,
                               stats_accumulator,
                               weight,
@@ -117,7 +158,8 @@ class _IndependentEnvRunner(_EnvRunner):
                               eval=True,
                               device_idx=0,
                               save_metrics=True,
-                              cinematic_recorder_cfg=None):
+                              cinematic_recorder_cfg=None,
+                              ):
 
         self._name = name
         self._save_metrics = save_metrics
@@ -127,10 +169,11 @@ class _IndependentEnvRunner(_EnvRunner):
 
         device = torch.device('cuda:%d' % device_idx) if torch.cuda.device_count() > 1 else torch.device('cuda:0')
         with writer_lock: # hack to prevent multiple CLIP downloads ... argh should use a separate lock
-            self._agent.build(training=False, device=device)
+            # self._agent.build(training=False, device=device)
+            self._agent.build(training=False, device=device, temperature_scaler=self._temperature_scaler, action_selection=self._action_selection)
 
         logging.info('%s: Launching env.' % name)
-        np.random.seed()
+        np.random.seed(0) #np.random.seed()
 
         logging.info('Agent information:')
         logging.info(self._agent)
@@ -173,6 +216,11 @@ class _IndependentEnvRunner(_EnvRunner):
         total_transitions = {'train_envs': 0, 'eval_envs': 0}
         current_task_id = -1
 
+
+        reliability_results = {
+            'confidence': [],
+            'matching_labels': []
+        }
         for n_eval in range(self._num_eval_runs):
             if rec_cfg.enabled:
                 tr._cam_motion.save_pose()
@@ -191,18 +239,25 @@ class _IndependentEnvRunner(_EnvRunner):
             if self._wrapped_replay != None:
                 dataset = self._wrapped_replay.dataset()
                 data_iter = iter(dataset)
+
             # evaluate on N tasks * M episodes per task = total eval episodes
             for ep in range(self._eval_episodes):
+                episode_confidence = []
+                print('eval episodes {}'.format(ep))
                 eval_demo_seed = ep + self._eval_from_eps_number
                 logging.info('%s: Starting episode %d, seed %d.' % (name, ep, eval_demo_seed))
-
+                
                 # the current task gets reset after every M episodes
                 episode_rollout = []
 
                 if self._wrapped_replay != None:
                     sampled_batch = next(data_iter)
+                    # print('-------------')
+                    # print(sampled_batch)
+                    print('iterating...')
                 else: 
                     sampled_batch = None
+                print('self._episode_length', self._episode_length)
                 # batch = {k: v.to(self._train_device) for k, v in sampled_batch.items() if type(v) == torch.Tensor}
                 generator = self._rollout_generator.generator(
                     self._step_signal, env, self._agent,
@@ -210,7 +265,7 @@ class _IndependentEnvRunner(_EnvRunner):
                     eval, eval_demo_seed=eval_demo_seed,
                     record_enabled=rec_cfg.enabled, sampled_batch=sampled_batch)
                 try:
-                    for replay_transition in generator:
+                    for replay_transition, total_conf in generator:
                         while True:
                             if self._kill_signal.value:
                                 env.shutdown()
@@ -232,13 +287,15 @@ class _IndependentEnvRunner(_EnvRunner):
                                 for s in self._agent.act_summaries():
                                     self.agent_summaries.append(s)
                         episode_rollout.append(replay_transition)
+                        episode_confidence.append(total_conf)
                 except StopIteration as e:
                     continue
                 except Exception as e:
                     env.shutdown()
                     raise e
-                
-                
+                print('rollout_length', len(episode_rollout))
+                # for epro in episode_rollout:
+                #     print(epro.action)
 
                 with self.write_lock:
                     for transition in episode_rollout:
@@ -250,15 +307,24 @@ class _IndependentEnvRunner(_EnvRunner):
                         current_task_id = transition.info['active_task_id']
 
                 self._num_eval_episodes_signal.value += 1
-                for ep_ro in episode_rollout:
-                    print('action', ep_ro.action)
+                # for ep_ro in episode_rollout:
+                #     print('action', ep_ro.action)
 
                 task_name, _ = self._get_task_name()
                 reward = episode_rollout[-1].reward
                 lang_goal = env._lang_goal
                 print(f"Evaluating {task_name} | Episode {ep} | Score: {reward} | Lang Goal: {lang_goal}")
 
+                # add the confidence to the matching labels
+                reliability_results['confidence'].append(episode_confidence)
+                if reward == 100:
+                    reliability_results['matching_labels'].append([1 for _ in range(len(episode_confidence))])
+                else:
+                    reliability_results['matching_labels'].append([0 for _ in range(len(episode_confidence))])
+
+                # exit()
                 # save recording
+                print('rec_cfg', rec_cfg)
                 if rec_cfg.enabled:
                     success = reward > 0.99
                     record_file = os.path.join(seed_path, 'videos',
@@ -268,10 +334,53 @@ class _IndependentEnvRunner(_EnvRunner):
                                                                       'succ' if success else 'fail'))
 
                     lang_goal = self._eval_env._lang_goal
-
+                    print('record_file', record_file)
                     tr.save(record_file, lang_goal, reward)
                     tr._cam_motion.restore_pose()
+                # success = reward > 0.99
+                # record_file = os.path.join(seed_path, 'videos',
+                #                             '%s_w%s_s%s_%s.mp4' % (task_name,
+                #                                                     weight_name,
+                #                                                     eval_demo_seed,
+                #                                                     'succ' if success else 'fail'))
 
+                # lang_goal = self._eval_env._lang_goal
+                # print('record_file', record_file)
+                # tr.save(record_file, lang_goal, reward)
+                # tr._cam_motion.restore_pose()
+            # make the success/failure plots
+            ### v1
+            # colors = ['blue' if b else 'red' for b in reliability_results['matching_labels']]
+            # plt.scatter(reliability_results['confidence'], reliability_results['matching_labels'], c=colors)#, s=2)
+            # plt.yticks([0, 1], ['False', 'True'])
+            # plt.xlabel('Scores')
+            # plt.ylabel('Binary Value')
+            # plt.title('Scores vs Binary Value')
+            # plt.savefig('/home/bobwu/shared/results/success_fail_episodes.png') 
+            eval_task_name, multi_task = self._get_task_name()
+            dir_path = '/home/bobwu/shared/results/rollout/' + eval_task_name
+            os.makedirs(dir_path, exist_ok=True)
+
+            # # Draw the T/F for all episodes
+            # cmap = cm.rainbow(np.linspace(0, 1, len(reliability_results['confidence'])))
+
+            # for i, score in enumerate(reliability_results['confidence']):
+            #     color = cmap[i]
+                
+            #     for j, s in enumerate(score):
+            #         plt.scatter(s, reliability_results['matching_labels'][i][j], color=color)
+            #         plt.annotate(str(j), (s, reliability_results['matching_labels'][i][j]))
+                    
+            #     plt.yticks([0, 1], ['False', 'True'])
+            #     plt.xlabel('Confidence')
+            #     plt.ylabel('Episode Success')
+            #     plt.title('Confidence vs Episode Success')
+            #     handles = [plt.Rectangle((0,0),1,1, color=c) for c in cmap]
+            #     plt.legend(handles, ['Episode {}'.format(i+1) for i in range(len(reliability_results['confidence']))], loc='center right')
+            # plt.savefig(dir_path + '/' + eval_task_name + 'success_fail_episodes_colored.png')
+            # plt.close() 
+
+            self.draw_episodes(dir_path, reliability_results)
             # report summaries
             summaries = []
             summaries.extend(stats_accumulator.pop())

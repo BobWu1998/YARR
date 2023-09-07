@@ -44,7 +44,9 @@ class EnvRunner(object):
                  num_eval_runs: int = 1,
                  env_device: torch.device = None,
                  multi_task: bool = False,
-                 wrapped_replay = None):
+                 wrapped_replay = None,
+                 temperature_scaler = None,
+                 action_selection = None):
         self._train_env = train_env
         self._eval_env = eval_env if eval_env else train_env
         self._agent = agent
@@ -87,6 +89,8 @@ class EnvRunner(object):
         self._multi_task = multi_task
 
         self._wrapped_replay = wrapped_replay
+        self._temperature_scaler = temperature_scaler
+        self._action_selection = action_selection
 
     def summaries(self) -> List[Summary]:
         summaries = []

@@ -58,7 +58,9 @@ class _EnvRunner(object):
                  env_device: torch.device = None,
                  previous_loaded_weight_folder: str = '',
                  num_eval_runs: int = 1,
-                 wrapped_replay = None
+                 wrapped_replay = None,
+                 temperature_scaler = None,
+                 action_selection = None
                  ):
         self._train_env = train_env
         self._eval_env = eval_env
@@ -98,6 +100,8 @@ class _EnvRunner(object):
         self._new_weights = False
 
         self._wrapped_replay = wrapped_replay
+        self._temperature_scaler = temperature_scaler
+        self._action_selection = action_selection
 
     def restart_process(self, name: str):
         p = Process(target=self._run_env, args=self._p_args[name], name=name)
