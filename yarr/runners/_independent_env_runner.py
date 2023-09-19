@@ -174,6 +174,8 @@ class _IndependentEnvRunner(_EnvRunner):
 
         logging.info('%s: Launching env.' % name)
         np.random.seed(0) #np.random.seed()
+        torch.manual_seed(0)
+        torch.cuda.manual_seed(0)
 
         logging.info('Agent information:')
         logging.info(self._agent)

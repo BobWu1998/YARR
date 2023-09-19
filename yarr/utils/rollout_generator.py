@@ -33,7 +33,7 @@ class RolloutGenerator(object):
                 self._layer = 0
                 # print('translation', batch['trans_action_indicies'][:, self._layer * 3:self._layer * 3 + 3].int())
                 # print(batch.keys())
-                
+            # print('obs_history', obs_history)
             prepped_data = {k:torch.tensor([v], device=self._env_device) for k, v in obs_history.items()}
             # print('step_signal.value')
             # print(step_signal.value)

@@ -178,8 +178,11 @@ class _EnvRunner(object):
         self._agent.build(training=False, device=self._env_device)
 
         logging.info('%s: Launching env.' % name)
-        np.random.seed()
-
+        # np.random.seed()
+        np.random.seed(0) #np.random.seed()
+        torch.cuda.manual_seed(0)
+        torch.manual_seed(0)
+        
         logging.info('Agent information:')
         logging.info(self._agent)
 
