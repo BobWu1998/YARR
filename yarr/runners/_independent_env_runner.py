@@ -69,7 +69,8 @@ class _IndependentEnvRunner(_EnvRunner):
                              eval_epochs_signal, eval_report_signal, log_freq,
                              rollout_generator, save_load_lock, current_replay_ratio,
                              target_replay_ratio, weightsdir, logdir, env_device,
-                             previous_loaded_weight_folder, num_eval_runs, wrapped_replay, temperature_scaler, action_selection)
+                             previous_loaded_weight_folder, num_eval_runs, wrapped_replay, 
+                             temperature_scaler, action_selection)
 
     def _load_save(self):
         if self._weightsdir is None:
@@ -173,9 +174,9 @@ class _IndependentEnvRunner(_EnvRunner):
             self._agent.build(training=False, device=device, temperature_scaler=self._temperature_scaler, action_selection=self._action_selection)
 
         logging.info('%s: Launching env.' % name)
-        np.random.seed(0) #np.random.seed()
-        torch.manual_seed(0)
-        torch.cuda.manual_seed(0)
+        # np.random.seed(0) #np.random.seed()
+        # torch.manual_seed(0)
+        # torch.cuda.manual_seed(0)
 
         logging.info('Agent information:')
         logging.info(self._agent)
@@ -403,6 +404,32 @@ class _IndependentEnvRunner(_EnvRunner):
                 task_score = "unknown"
 
             print(f"Finished {eval_task_name} | Final Score: {task_score}\n")
+            
+            
+            ## adding log for current episode
+            tau = self._action_selection._tau
+            search_size = self._action_selection._search_size
+            search_step = self._action_selection._search_step
+            # Create a file name based on tau, search_size, and search_step
+            if self._action_selection.enabled:
+                action_type = 'safe'
+            else:
+                action_type = 'best'
+            file_name = f"tau_{tau}_search_size_{search_size}_search_step_{search_step}_{action_type}.txt"
+
+            # Full path to the file
+            # file_path = f"/home/bobwu/shared/tau_4_5_8_10_12/"
+            file_path = self._action_selection.log_dir
+            # Ensure the directory exists
+            directory = os.path.dirname(file_path)
+            if not os.path.exists(directory):
+                os.makedirs(directory)
+            # Write the output to the file
+            with open(file_path+file_name, 'w') as f:
+                f.write(f"tau: {tau}\n")
+                f.write(f"search_size: {search_size}\n")
+                f.write(f"search_step: {search_step}\n")
+                f.write(f"Finished {eval_task_name} | Final Score: {task_score}\n")
 
             if self._save_metrics:
                 with writer_lock:

@@ -611,6 +611,7 @@ class UniformReplayBuffer(ReplayBuffer):
         attempt_count = 0
         while (len(indices) < batch_size and
                        attempt_count < self._max_sample_attempts):
+            # np.random.seed(0)
             index = np.random.randint(min_id, max_id) % self._replay_capacity
             if self.is_valid_transition(index):
                 indices.append(index)

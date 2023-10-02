@@ -97,6 +97,7 @@ class TaskUniformReplayBuffer(UniformReplayBuffer):
         # uniform distribution of tasks
         while not found_indicies and attempt_count < 1000:
             # sample random tasks of batch_size length
+            # np.random.seed(0)
             sampled_tasks = list(np.random.choice(tasks, batch_size, replace=(batch_size > len(tasks))))
             potential_indices = []
             for task in sampled_tasks:

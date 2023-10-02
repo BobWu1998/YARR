@@ -28,7 +28,9 @@ from uncertainty_module.temperature_scaling import TemperatureScaler
 from uncertainty_module.action_selection import ActionSelection
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+import wandb
 
+from torch.utils.tensorboard import SummaryWriter
 
 class OfflineTrainRunner():
 
@@ -73,19 +75,21 @@ class OfflineTrainRunner():
         self._task_name = task_name
         self._temperature_scaler = temperature_scaler
         self._action_selection = action_selection
-
+        print('OfflineTrainRunner constructing')
         self._writer = None
-        if logdir is None:
-            logging.info("'logdir' was None. No logging will take place.")
-        else:
-            self._writer = LogWriter(
-                self._logdir, tensorboard_logging, csv_logging)
-
+        # if logdir is None:
+        #     logging.info("'logdir' was None. No logging will take place.")
+        # else:
+        #     self._writer = LogWriter(
+        #         self._logdir, tensorboard_logging, csv_logging)
+        print('logdir',logdir)
         if weightsdir is None:
             logging.info(
                 "'weightsdir' was None. No weight saving will take place.")
         else:
             os.makedirs(self._weightsdir, exist_ok=True)
+            
+        print('OfflineTrainRunner constructed')
 
     def _save_model(self, i):
         d = os.path.join(self._weightsdir, str(i))
@@ -104,7 +108,8 @@ class OfflineTrainRunner():
         total_conf = update_conf['total_conf']
         true_pred = update_conf['total_true_pred']
         total_temp_scaler_loss = update_conf['total_temp_scaler_loss']
-        return total_losses, total_conf, true_pred, total_temp_scaler_loss
+        temp_scaler = update_conf['temp_scaler']
+        return total_losses, total_conf, true_pred, total_temp_scaler_loss, temp_scaler
 
     def _get_resume_eval_epoch(self):
         starting_epoch = 0
@@ -119,8 +124,25 @@ class OfflineTrainRunner():
     def start(self):
         logging.getLogger().setLevel(self._logging_level)
         self._agent = copy.deepcopy(self._agent)
+        if self._temperature_scaler.training:
+            run = wandb.init(project='temp_train_out_distribution', entity='bobwupenn', name=self._task_name)
+        
+        # temp_log_path = '/home/bobwu/shared/temp_train_5tasks/'+self._task_name+'/'
+        temp_log_path = self._temperature_scaler.temp_log_root + '/' + self._task_name +'/'
+        
+        # print(temp_log_path)
+        if not os.path.exists(temp_log_path):
+            os.makedirs(temp_log_path)
+        # print(temp_log_path[:-1])
+        # if self._temperature_scaler.training:
+        #     self._temp_writer = SummaryWriter('runs/my_experiment')
+        # print('great')
+        
+        # if self._temperature_scaler.training:
+        #     self._agent.build(training=False, device=self._train_device, temperature_scaler=self._temperature_scaler, action_selection = self._action_selection)
+        # else:
+        #     self._agent.build(training=True, device=self._train_device, temperature_scaler=self._temperature_scaler, action_selection = self._action_selection)
         self._agent.build(training=True, device=self._train_device, temperature_scaler=self._temperature_scaler, action_selection = self._action_selection)
-
         if self._weightsdir is not None:
             existing_weights = sorted([int(f) for f in os.listdir(self._weightsdir)])
             if (not self._load_existing_weights) or len(existing_weights) == 0:
@@ -133,13 +155,21 @@ class OfflineTrainRunner():
                 start_iter = resume_iteration + 1
                 if self._rank == 0:
                     logging.info(f"Resuming training from iteration {resume_iteration} ...")
-
+        # import pdb
+        # pdb.set_trace()
+        
+        # print('existing_weights', existing_weights)
+        # print('resume iteration', resume_iteration)
+        # exit()
         dataset = self._wrapped_buffer.dataset()
         data_iter = iter(dataset)
 
         process = psutil.Process(os.getpid())
         num_cpu = psutil.cpu_count()
-        self._iterations = 600000 + 200 #1000 #1000 #1000 #1000 #TODO: add support for this
+        if not self._temperature_scaler.training:
+            self._iterations = start_iter+1000 #1000 #1000 #1000 #1000 #TODO: add support for this
+        else:
+            self._iterations = 600000+self._temperature_scaler.training_iter #1000 #1000 #1000 #1000 #TODO: add support for this
         logging.info('start_iter {}'.format(start_iter))
         logging.info('self._iterations {}'.format(self._iterations))
 
@@ -147,7 +177,8 @@ class OfflineTrainRunner():
             'confidence': [],
             'matching_labels': []
         }
-        for i in tqdm(range(start_iter, self._iterations)):
+        
+        for i in range(start_iter, self._iterations):
             print('iterations: {}'.format(i))
             log_iteration = i % self._log_freq == 0 and i > 0
 
@@ -160,11 +191,17 @@ class OfflineTrainRunner():
 
             batch = {k: v.to(self._train_device) for k, v in sampled_batch.items() if type(v) == torch.Tensor}
             t = time.time()
-            loss, total_conf, true_pred, total_temp_scaler_loss = self._step(i, batch)
+            loss, total_conf, true_pred, total_temp_scaler_loss, temp_scaler = self._step(i, batch)
             reliability_results['confidence'].append(total_conf[0])
             reliability_results['matching_labels'].append(true_pred)
             step_time = time.time() - t
             logging.info('self._rank {}'.format(self._rank))
+            print('total_temp_scaler_loss', total_temp_scaler_loss)
+            if self._temperature_scaler.training:
+                wandb.log({'epoch loss': total_temp_scaler_loss.cpu().item(), 'temperature': temp_scaler.cpu().item()})
+                # self._temp_writer.add_scalar('epoch loss', total_temp_scaler_loss, t)
+                # self._temp_writer.add_scalar('temperature', temp_scaler, t)
+                
             if self._rank == 0:
                 if log_iteration and self._writer is not None:
                     agent_summaries = self._agent.update_summaries()
@@ -180,12 +217,19 @@ class OfflineTrainRunner():
                     logging.info(f"Train Step {i:06d} | Loss: {loss:0.5f} | Sample time: {sample_time:0.6f} | Step time: {step_time:0.4f}.")
                     logging.info(f"Train Step {i:06d} | Temp Scaling Loss: {total_temp_scaler_loss:0.5f} | Sample time: {sample_time:0.6f} | Step time: {step_time:0.4f}.")
                     
-                self._writer.end_iteration()
+                # self._writer.end_iteration()
 
                 if i % self._save_freq == 0 and self._weightsdir is not None:
-                    torch.save(self._agent.scaler.temperature, 'temperature.pth')
+                    # torch.save(self._agent.scaler.temperature, 'temperature.pth')
+                    torch.save(temp_scaler, temp_log_path+self._task_name+'_temperature.pth')
                     self._save_model(i)
-
+                    
+                    
+        # if self._temperature_scaler.training:
+        #     self._temp_writer.close()
+        if self._temperature_scaler.training:
+            torch.save(temp_scaler, temp_log_path+self._task_name+'_temperature.pth')
+            run.finish()
         if self._rank == 0 and self._writer is not None:
             self._writer.close()
             logging.info('Stopping envs ...')
@@ -196,15 +240,16 @@ class OfflineTrainRunner():
 
             reliability_results[k] = np.array(v)
 
-        thresholds = [0.1*i for i in range(10)]
+        thresholds = [0.1*i for i in range(100)]
         confidence_bin = np.zeros(len(reliability_results['confidence']))
         for thresh in thresholds:
             mask = reliability_results['confidence'] > thresh
             indices = np.where(mask)[0]
             confidence_bin[indices] += 1
 
-        accuracy = np.zeros(10)
-        for i in range(10):
+        num_bins = 100
+        accuracy = np.zeros(num_bins)
+        for i in range(num_bins):
             print(i)
             if (sum(reliability_results['matching_labels'][confidence_bin == i])) == 0:
                 accuracy[i] = 0
@@ -214,7 +259,7 @@ class OfflineTrainRunner():
         print('accuracy', accuracy)
         fig, ax = plt.subplots()
 
-        bars = ax.bar(thresholds, accuracy, width=0.1, edgecolor='black')
+        bars = ax.bar(thresholds, accuracy, width=1/num_bins, edgecolor='black')
 
         # Add some labels and title
         ax.set_xlabel('Confidence')
@@ -225,7 +270,7 @@ class OfflineTrainRunner():
         plt.tight_layout()
         
         # create the log folder
-        path = "/home/bobwu/shared/results/random_sample/" + self._task_name 
+        path = "/home/bobwu/shared/results/random_sample_trained_indiv/" + self._task_name 
         if os.path.exists(path):
             shutil.rmtree(path)
         os.makedirs(path)
@@ -233,6 +278,7 @@ class OfflineTrainRunner():
         plt.savefig(path+'/random_reliab.png') 
         print('logging confidence-accuracy plot done! ')
         plt.close()
+        torch.save(reliability_results, path+'/results.pth')
 
         # make the success/failure plots
         colors = ['blue' if b else 'red' for b in reliability_results['matching_labels']]

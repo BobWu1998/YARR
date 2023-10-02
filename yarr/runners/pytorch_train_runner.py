@@ -231,7 +231,7 @@ class PyTorchTrainRunner(TrainRunner):
                 del replay_ratio
 
             t = time.time()
-
+            # np.random.seed(0)
             sampled_task_ids = np.random.choice(
                 range(len(datasets)), self._buffers_per_batch, replace=False)
             sampled_batch = [next(data_iter[j]) for j in sampled_task_ids]
