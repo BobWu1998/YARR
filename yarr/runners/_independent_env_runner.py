@@ -58,7 +58,7 @@ class _IndependentEnvRunner(_EnvRunner):
                  previous_loaded_weight_folder: str = '',
                  num_eval_runs: int = 1,
                  wrapped_replay = None,
-                 temperature_scaler = None,
+                 calib_scaler = None,
                  action_selection = None
                  ):
 
@@ -70,7 +70,7 @@ class _IndependentEnvRunner(_EnvRunner):
                              rollout_generator, save_load_lock, current_replay_ratio,
                              target_replay_ratio, weightsdir, logdir, env_device,
                              previous_loaded_weight_folder, num_eval_runs, wrapped_replay, 
-                             temperature_scaler, action_selection)
+                             calib_scaler, action_selection)
 
     def _load_save(self):
         if self._weightsdir is None:
@@ -171,7 +171,7 @@ class _IndependentEnvRunner(_EnvRunner):
         device = torch.device('cuda:%d' % device_idx) if torch.cuda.device_count() > 1 else torch.device('cuda:0')
         with writer_lock: # hack to prevent multiple CLIP downloads ... argh should use a separate lock
             # self._agent.build(training=False, device=device)
-            self._agent.build(training=False, device=device, temperature_scaler=self._temperature_scaler, action_selection=self._action_selection)
+            self._agent.build(training=False, device=device, calib_scaler=self._calib_scaler, action_selection=self._action_selection)
 
         logging.info('%s: Launching env.' % name)
         # np.random.seed(0) #np.random.seed()
@@ -242,7 +242,7 @@ class _IndependentEnvRunner(_EnvRunner):
             if self._wrapped_replay != None:
                 dataset = self._wrapped_replay.dataset()
                 data_iter = iter(dataset)
-
+            
             # evaluate on N tasks * M episodes per task = total eval episodes
             for ep in range(self._eval_episodes):
                 episode_confidence = []

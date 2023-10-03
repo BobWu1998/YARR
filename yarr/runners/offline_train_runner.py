@@ -24,7 +24,8 @@ from yarr.utils.log_writer import LogWriter
 from yarr.utils.stat_accumulator import StatAccumulator
 from yarr.replay_buffer.prioritized_replay_buffer import PrioritizedReplayBuffer
 
-from uncertainty_module.temperature_scaling import TemperatureScaler
+from uncertainty_module.src.base.calib_scaling import CalibScaler
+# from uncertainty_module.temperature_scaling import TemperatureScaler
 from uncertainty_module.action_selection import ActionSelection
 import matplotlib.pyplot as plt
 from tqdm import tqdm
@@ -52,7 +53,7 @@ class OfflineTrainRunner():
                  rank: int = None,
                  world_size: int = None,
                  task_name: str = None,
-                 temperature_scaler: TemperatureScaler = None,
+                 calib_scaler: CalibScaler = None,
                  action_selection: ActionSelection = None):
         self._agent = agent
         self._wrapped_buffer = wrapped_replay_buffer
@@ -73,7 +74,7 @@ class OfflineTrainRunner():
         self._rank = rank
         self._world_size = world_size
         self._task_name = task_name
-        self._temperature_scaler = temperature_scaler
+        self._calib_scaler = calib_scaler
         self._action_selection = action_selection
         print('OfflineTrainRunner constructing')
         self._writer = None
@@ -107,9 +108,9 @@ class OfflineTrainRunner():
         total_losses = update_dict['total_losses'].item()
         total_conf = update_conf['total_conf']
         true_pred = update_conf['total_true_pred']
-        total_temp_scaler_loss = update_conf['total_temp_scaler_loss']
-        temp_scaler = update_conf['temp_scaler']
-        return total_losses, total_conf, true_pred, total_temp_scaler_loss, temp_scaler
+        total_scaler_loss = update_conf['total_scaler_loss']
+        scaler = update_conf['scaler']
+        return total_losses, total_conf, true_pred, total_scaler_loss, scaler
 
     def _get_resume_eval_epoch(self):
         starting_epoch = 0
@@ -124,15 +125,16 @@ class OfflineTrainRunner():
     def start(self):
         logging.getLogger().setLevel(self._logging_level)
         self._agent = copy.deepcopy(self._agent)
-        if self._temperature_scaler.training:
-            run = wandb.init(project='temp_train_out_distribution', entity='bobwupenn', name=self._task_name)
+        if self._calib_scaler.training:
+            # run = wandb.init(project='temp_train_out_distribution', entity='bobwupenn', name=self._task_name)
+            run = wandb.init(project='vector_train', entity='bobwupenn', name=self._task_name)
         
         # temp_log_path = '/home/bobwu/shared/temp_train_5tasks/'+self._task_name+'/'
-        temp_log_path = self._temperature_scaler.temp_log_root + '/' + self._task_name +'/'
+        # temp_log_path = self._temperature_scaler.temp_log_root + '/' + self._task_name +'/'
         
-        # print(temp_log_path)
-        if not os.path.exists(temp_log_path):
-            os.makedirs(temp_log_path)
+        # # print(temp_log_path)
+        # if not os.path.exists(temp_log_path):
+        #     os.makedirs(temp_log_path)
         # print(temp_log_path[:-1])
         # if self._temperature_scaler.training:
         #     self._temp_writer = SummaryWriter('runs/my_experiment')
@@ -142,7 +144,11 @@ class OfflineTrainRunner():
         #     self._agent.build(training=False, device=self._train_device, temperature_scaler=self._temperature_scaler, action_selection = self._action_selection)
         # else:
         #     self._agent.build(training=True, device=self._train_device, temperature_scaler=self._temperature_scaler, action_selection = self._action_selection)
-        self._agent.build(training=True, device=self._train_device, temperature_scaler=self._temperature_scaler, action_selection = self._action_selection)
+        
+        self._agent.build(training=True, device=self._train_device, calib_scaler=self._calib_scaler, action_selection = self._action_selection)
+        if not self._calib_scaler.training:
+            self._calib_scaler.load_parameter(task_name=self._task_name)
+        
         if self._weightsdir is not None:
             existing_weights = sorted([int(f) for f in os.listdir(self._weightsdir)])
             if (not self._load_existing_weights) or len(existing_weights) == 0:
@@ -166,10 +172,10 @@ class OfflineTrainRunner():
 
         process = psutil.Process(os.getpid())
         num_cpu = psutil.cpu_count()
-        if not self._temperature_scaler.training:
+        if not self._calib_scaler.training:
             self._iterations = start_iter+1000 #1000 #1000 #1000 #1000 #TODO: add support for this
         else:
-            self._iterations = 600000+self._temperature_scaler.training_iter #1000 #1000 #1000 #1000 #TODO: add support for this
+            self._iterations = 600000+self._calib_scaler.training_iter #1000 #1000 #1000 #1000 #TODO: add support for this
         logging.info('start_iter {}'.format(start_iter))
         logging.info('self._iterations {}'.format(self._iterations))
 
@@ -191,14 +197,17 @@ class OfflineTrainRunner():
 
             batch = {k: v.to(self._train_device) for k, v in sampled_batch.items() if type(v) == torch.Tensor}
             t = time.time()
-            loss, total_conf, true_pred, total_temp_scaler_loss, temp_scaler = self._step(i, batch)
+            loss, total_conf, true_pred, total_scaler_loss, scaler = self._step(i, batch)
             reliability_results['confidence'].append(total_conf[0])
             reliability_results['matching_labels'].append(true_pred)
             step_time = time.time() - t
             logging.info('self._rank {}'.format(self._rank))
-            print('total_temp_scaler_loss', total_temp_scaler_loss)
-            if self._temperature_scaler.training:
-                wandb.log({'epoch loss': total_temp_scaler_loss.cpu().item(), 'temperature': temp_scaler.cpu().item()})
+            print('total_scaler_loss', total_scaler_loss)
+            if self._calib_scaler.training:
+                if self._calib_scaler.calib_type == 'temperature':
+                    wandb.log({'epoch loss': total_scaler_loss.cpu().item(), 'temperature': scaler.cpu().item()})
+                else:
+                    wandb.log({'epoch loss': total_scaler_loss.cpu().item()})
                 # self._temp_writer.add_scalar('epoch loss', total_temp_scaler_loss, t)
                 # self._temp_writer.add_scalar('temperature', temp_scaler, t)
                 
@@ -215,20 +224,21 @@ class OfflineTrainRunner():
                         process.cpu_percent(interval=None) / num_cpu)
 
                     logging.info(f"Train Step {i:06d} | Loss: {loss:0.5f} | Sample time: {sample_time:0.6f} | Step time: {step_time:0.4f}.")
-                    logging.info(f"Train Step {i:06d} | Temp Scaling Loss: {total_temp_scaler_loss:0.5f} | Sample time: {sample_time:0.6f} | Step time: {step_time:0.4f}.")
+                    logging.info(f"Train Step {i:06d} | Scaling Loss: {total_scaler_loss:0.5f} | Sample time: {sample_time:0.6f} | Step time: {step_time:0.4f}.")
                     
                 # self._writer.end_iteration()
 
                 if i % self._save_freq == 0 and self._weightsdir is not None:
                     # torch.save(self._agent.scaler.temperature, 'temperature.pth')
-                    torch.save(temp_scaler, temp_log_path+self._task_name+'_temperature.pth')
+                    # torch.save(temp_scaler, temp_log_path+self._task_name+'_temperature.pth')
                     self._save_model(i)
                     
                     
         # if self._temperature_scaler.training:
         #     self._temp_writer.close()
-        if self._temperature_scaler.training:
-            torch.save(temp_scaler, temp_log_path+self._task_name+'_temperature.pth')
+        if self._calib_scaler.training:
+            # torch.save(temp_scaler, temp_log_path+self._task_name+'_temperature.pth')
+            self._calib_scaler.save_parameter(task_name=self._task_name)
             run.finish()
         if self._rank == 0 and self._writer is not None:
             self._writer.close()

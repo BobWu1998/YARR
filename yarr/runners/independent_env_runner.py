@@ -41,13 +41,13 @@ class IndependentEnvRunner(EnvRunner):
                  env_device: torch.device = None,
                  multi_task: bool = False,
                  wrapped_replay = None,
-                 temperature_scaler = None,
+                 calib_scaler = None,
                  action_selection = None):
             super().__init__(train_env, agent, train_replay_buffer, num_train_envs, num_eval_envs,
                             rollout_episodes, eval_episodes, training_iterations, eval_from_eps_number,
                             episode_length, eval_env, eval_replay_buffer, stat_accumulator,
                             rollout_generator, weightsdir, logdir, max_fails, num_eval_runs,
-                            env_device, multi_task, wrapped_replay, temperature_scaler, action_selection)
+                            env_device, multi_task, wrapped_replay, calib_scaler, action_selection)
 
     def summaries(self) -> List[Summary]:
         summaries = []
@@ -119,7 +119,7 @@ class IndependentEnvRunner(EnvRunner):
             self._weightsdir, self._logdir,
             self._env_device, self._previous_loaded_weight_folder,
             num_eval_runs=self._num_eval_runs, wrapped_replay = self._wrapped_replay,
-            temperature_scaler = self._temperature_scaler,
+            calib_scaler = self._calib_scaler,
             action_selection = self._action_selection)
 
         stat_accumulator = SimpleAccumulator(eval_video_fps=30)

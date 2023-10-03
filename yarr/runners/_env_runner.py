@@ -59,7 +59,7 @@ class _EnvRunner(object):
                  previous_loaded_weight_folder: str = '',
                  num_eval_runs: int = 1,
                  wrapped_replay = None,
-                 temperature_scaler = None,
+                 calib_scaler = None,
                  action_selection = None
                  ):
         self._train_env = train_env
@@ -100,7 +100,7 @@ class _EnvRunner(object):
         self._new_weights = False
 
         self._wrapped_replay = wrapped_replay
-        self._temperature_scaler = temperature_scaler
+        self._calib_scaler = calib_scaler
         self._action_selection = action_selection
 
     def restart_process(self, name: str):
