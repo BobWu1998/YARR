@@ -127,7 +127,12 @@ class OfflineTrainRunner():
         self._agent = copy.deepcopy(self._agent)
         if self._calib_scaler.training:
             # run = wandb.init(project='temp_train_out_distribution', entity='bobwupenn', name=self._task_name)
-            run = wandb.init(project='vector_train', entity='bobwupenn', name=self._task_name)
+            if self._calib_scaler.calib_type == 'vector':
+                run = wandb.init(project='vector_train_v7', entity='bobwupenn', name=self._task_name
+                                                                                +'_'+str(self._calib_scaler.lr)
+                                                                                +'_'+str(self._calib_scaler.div_penalty))
+            else:
+                un = wandb.init(project='temp_train_v7', entity='bobwupenn', name=self._task_name)
         
         # temp_log_path = '/home/bobwu/shared/temp_train_5tasks/'+self._task_name+'/'
         # temp_log_path = self._temperature_scaler.temp_log_root + '/' + self._task_name +'/'
@@ -202,12 +207,20 @@ class OfflineTrainRunner():
             reliability_results['matching_labels'].append(true_pred)
             step_time = time.time() - t
             logging.info('self._rank {}'.format(self._rank))
-            print('total_scaler_loss', total_scaler_loss)
+            # print('total_scaler_loss', total_scaler_loss)
             if self._calib_scaler.training:
                 if self._calib_scaler.calib_type == 'temperature':
                     wandb.log({'epoch loss': total_scaler_loss.cpu().item(), 'temperature': scaler.cpu().item()})
                 else:
-                    wandb.log({'epoch loss': total_scaler_loss.cpu().item()})
+                    wandb.log({'epoch loss': total_scaler_loss.cpu().item(), 
+                               'non_scaled_penalty': scaler['non_scaled_penalty'],
+                               'weight_mean': scaler['weight_mean'],
+                               'weight_min': scaler['weight_min'],
+                               'weight_max': scaler['weight_max'],
+                               'bias_mean': scaler['bias_mean'],
+                               'bias_min': scaler['bias_min'],
+                               'bias_max': scaler['bias_max']
+                               })
                 # self._temp_writer.add_scalar('epoch loss', total_temp_scaler_loss, t)
                 # self._temp_writer.add_scalar('temperature', temp_scaler, t)
                 
@@ -280,7 +293,7 @@ class OfflineTrainRunner():
         plt.tight_layout()
         
         # create the log folder
-        path = "/home/bobwu/shared/results/random_sample_trained_indiv/" + self._task_name 
+        path = "/home/bobwu/shared/results/random_sample_trained_indiv_uncalib/" + self._task_name 
         if os.path.exists(path):
             shutil.rmtree(path)
         os.makedirs(path)
