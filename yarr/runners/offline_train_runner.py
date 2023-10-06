@@ -126,29 +126,12 @@ class OfflineTrainRunner():
         logging.getLogger().setLevel(self._logging_level)
         self._agent = copy.deepcopy(self._agent)
         if self._calib_scaler.training:
-            # run = wandb.init(project='temp_train_out_distribution', entity='bobwupenn', name=self._task_name)
             if self._calib_scaler.calib_type == 'vector':
-                run = wandb.init(project='vector_train_v7', entity='bobwupenn', name=self._task_name
+                run = wandb.init(project='vector_train_v7', entity='your_entity', name=self._task_name
                                                                                 +'_'+str(self._calib_scaler.lr)
                                                                                 +'_'+str(self._calib_scaler.div_penalty))
             else:
-                un = wandb.init(project='temp_train_v7', entity='bobwupenn', name=self._task_name)
-        
-        # temp_log_path = '/home/bobwu/shared/temp_train_5tasks/'+self._task_name+'/'
-        # temp_log_path = self._temperature_scaler.temp_log_root + '/' + self._task_name +'/'
-        
-        # # print(temp_log_path)
-        # if not os.path.exists(temp_log_path):
-        #     os.makedirs(temp_log_path)
-        # print(temp_log_path[:-1])
-        # if self._temperature_scaler.training:
-        #     self._temp_writer = SummaryWriter('runs/my_experiment')
-        # print('great')
-        
-        # if self._temperature_scaler.training:
-        #     self._agent.build(training=False, device=self._train_device, temperature_scaler=self._temperature_scaler, action_selection = self._action_selection)
-        # else:
-        #     self._agent.build(training=True, device=self._train_device, temperature_scaler=self._temperature_scaler, action_selection = self._action_selection)
+                un = wandb.init(project='temp_train_v7', entity='your_entity', name=self._task_name)
         
         self._agent.build(training=True, device=self._train_device, calib_scaler=self._calib_scaler, action_selection = self._action_selection)
         if not self._calib_scaler.training:
@@ -292,29 +275,29 @@ class OfflineTrainRunner():
         # Display the plot
         plt.tight_layout()
         
-        # create the log folder
-        path = "/home/bobwu/shared/results/random_sample_trained_indiv_uncalib/" + self._task_name 
-        if os.path.exists(path):
-            shutil.rmtree(path)
-        os.makedirs(path)
+        # # create the log folder
+        # path = "Set this DIR" 
+        # if os.path.exists(path):
+        #     shutil.rmtree(path)
+        # os.makedirs(path)
 
-        plt.savefig(path+'/random_reliab.png') 
-        print('logging confidence-accuracy plot done! ')
-        plt.close()
-        torch.save(reliability_results, path+'/results.pth')
+        # plt.savefig(path+'/random_reliab.png') 
+        # print('logging confidence-accuracy plot done! ')
+        # plt.close()
+        # torch.save(reliability_results, path+'/results.pth')
 
-        # make the success/failure plots
-        colors = ['blue' if b else 'red' for b in reliability_results['matching_labels']]
-        plt.scatter(reliability_results['confidence'], reliability_results['matching_labels'], c=colors, s=2)
-        plt.yticks([0, 1], ['False', 'True'])
-        plt.xlabel('Confidence')
-        plt.ylabel('Step Success')
-        plt.title(self._task_name + ' Confidence vs Step Success')
-        plt.savefig(path+'/random_success_fail.png') 
-        plt.close()
-        # plt.show()
-        for i in range(10):
-            print(len(reliability_results['matching_labels'][confidence_bin == i]))
+        # # make the success/failure plots
+        # colors = ['blue' if b else 'red' for b in reliability_results['matching_labels']]
+        # plt.scatter(reliability_results['confidence'], reliability_results['matching_labels'], c=colors, s=2)
+        # plt.yticks([0, 1], ['False', 'True'])
+        # plt.xlabel('Confidence')
+        # plt.ylabel('Step Success')
+        # plt.title(self._task_name + ' Confidence vs Step Success')
+        # plt.savefig(path+'/random_success_fail.png') 
+        # plt.close()
+        # # plt.show()
+        # for i in range(10):
+        #     print(len(reliability_results['matching_labels'][confidence_bin == i]))
 
         def count_child_processes():
             current_process = psutil.Process(os.getpid())

@@ -359,31 +359,32 @@ class _IndependentEnvRunner(_EnvRunner):
             # plt.xlabel('Scores')
             # plt.ylabel('Binary Value')
             # plt.title('Scores vs Binary Value')
-            # plt.savefig('/home/bobwu/shared/results/success_fail_episodes.png') 
-            eval_task_name, multi_task = self._get_task_name()
-            dir_path = '/home/bobwu/shared/results/rollout/' + eval_task_name
-            os.makedirs(dir_path, exist_ok=True)
+            # plt.savefig('/home/DIR/shared/results/success_fail_episodes.png') 
+            
+            # eval_task_name, multi_task = self._get_task_name()
+            # dir_path = 'Set DIR' + eval_task_name
+            # os.makedirs(dir_path, exist_ok=True)
 
-            # # Draw the T/F for all episodes
-            # cmap = cm.rainbow(np.linspace(0, 1, len(reliability_results['confidence'])))
+            # # # Draw the T/F for all episodes
+            # # cmap = cm.rainbow(np.linspace(0, 1, len(reliability_results['confidence'])))
 
-            # for i, score in enumerate(reliability_results['confidence']):
-            #     color = cmap[i]
+            # # for i, score in enumerate(reliability_results['confidence']):
+            # #     color = cmap[i]
                 
-            #     for j, s in enumerate(score):
-            #         plt.scatter(s, reliability_results['matching_labels'][i][j], color=color)
-            #         plt.annotate(str(j), (s, reliability_results['matching_labels'][i][j]))
+            # #     for j, s in enumerate(score):
+            # #         plt.scatter(s, reliability_results['matching_labels'][i][j], color=color)
+            # #         plt.annotate(str(j), (s, reliability_results['matching_labels'][i][j]))
                     
-            #     plt.yticks([0, 1], ['False', 'True'])
-            #     plt.xlabel('Confidence')
-            #     plt.ylabel('Episode Success')
-            #     plt.title('Confidence vs Episode Success')
-            #     handles = [plt.Rectangle((0,0),1,1, color=c) for c in cmap]
-            #     plt.legend(handles, ['Episode {}'.format(i+1) for i in range(len(reliability_results['confidence']))], loc='center right')
-            # plt.savefig(dir_path + '/' + eval_task_name + 'success_fail_episodes_colored.png')
-            # plt.close() 
+            # #     plt.yticks([0, 1], ['False', 'True'])
+            # #     plt.xlabel('Confidence')
+            # #     plt.ylabel('Episode Success')
+            # #     plt.title('Confidence vs Episode Success')
+            # #     handles = [plt.Rectangle((0,0),1,1, color=c) for c in cmap]
+            # #     plt.legend(handles, ['Episode {}'.format(i+1) for i in range(len(reliability_results['confidence']))], loc='center right')
+            # # plt.savefig(dir_path + '/' + eval_task_name + 'success_fail_episodes_colored.png')
+            # # plt.close() 
 
-            self.draw_episodes(dir_path, reliability_results)
+            # self.draw_episodes(dir_path, reliability_results)
             # report summaries
             summaries = []
             summaries.extend(stats_accumulator.pop())
@@ -418,7 +419,6 @@ class _IndependentEnvRunner(_EnvRunner):
             file_name = f"tau_{tau}_search_size_{search_size}_search_step_{search_step}_{action_type}.txt"
 
             # Full path to the file
-            # file_path = f"/home/bobwu/shared/tau_4_5_8_10_12/"
             file_path = self._action_selection.log_dir
             # Ensure the directory exists
             directory = os.path.dirname(file_path)
